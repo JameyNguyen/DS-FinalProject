@@ -1,0 +1,227 @@
+---
+title: "Corn Leaf Disease Dataset Analysis"
+author: "Jamey Nguyen"
+date: "March 31st, 2025"
+output: github_document
+---
+
+# Introduction
+
+The health of corn crops is critical to global agriculture, as corn is a staple food for both humans and livestock. However, corn plants are susceptible to various diseases that reduce yield and quality. This report analyzes the **Corn or Maize Leaf Disease Dataset**, which contains images of corn leaves with different disease statuses.  
+The goal is to **prepare the dataset for modeling tasks, explore image samples, and identify patterns that may help classify leaf diseases in the future.**  
+This project emphasizes **data cleaning, preprocessing, and visualization**.
+
+# Data
+
+## Data Source
+
+The dataset was obtained from Kaggle:  
+[https://www.kaggle.com/datasets/smaranjitghose/corn-or-maize-leaf-disease-dataset](https://www.kaggle.com/datasets/smaranjitghose/corn-or-maize-leaf-disease-dataset)
+
+It contains labeled images classified into several categories of leaf health, such as:
+- Healthy
+- Cercospora Leaf Spot (Gray Leaf Spot)
+- Common Rust
+- Northern Leaf Blight
+
+## Data Processing
+
+### Download and Extract the Dataset
+
+```{r download-data-here, echo=TRUE, message=FALSE}
+install_if_missing <- function(packages) {
+  installed <- packages %in% installed.packages()[, "Package"]
+  if (any(!installed)) {
+    install.packages(packages[!installed])
+  }
+}
+
+required_packages <- c("here", "imager", "ggplot2", "reshape2")
+install_if_missing(required_packages)
+library(here)
+
+# Build paths relative
+dataset_zip <- here("corn-or-maize-leaf-disease-dataset.zip")
+dataset_folder <- here("corn-or-maize-leaf-disease-dataset/data")
+
+if (!file.exists(dataset_zip)) {
+  system("kaggle datasets download -d smaranjitghose/corn-or-maize-leaf-disease-dataset")
+}
+
+if (!dir.exists(dataset_folder)) {
+  unzip(dataset_zip, exdir = here())  # Extracts in project root
+}
+
+# Confirm the actual folders
+disease_categories <- list.dirs(path = dataset_folder, full.names = TRUE, recursive = FALSE)
+print(disease_categories)
+
+```
+
+### Load and Display Categories
+
+```{r load-categories, echo=TRUE}
+disease_categories <- list.dirs(path = dataset_folder, full.names = TRUE, recursive = FALSE)
+print(basename(disease_categories))
+```
+
+### Image Preprocessing: Resize All Images
+
+```{r resize-images, echo=TRUE, warning=FALSE, message=FALSE}
+if (!requireNamespace("imager", quietly = TRUE)) {
+  install.packages("imager")
+}
+library(imager)
+
+# Function to resize and save image
+resize_and_save <- function(image_path, output_path, width, height) {
+  img <- load.image(image_path)
+  img_resized <- resize(img, size_x = width, size_y = height)
+  save.image(img_resized, output_path)
+}
+
+# Set target dimensions
+target_width <- 128
+target_height <- 128
+
+# Create processed data folder
+processed_dir <- "processed_data"
+dir.create(processed_dir, recursive = TRUE, showWarnings = FALSE)
+
+# Apply resizing to all images
+for (category in disease_categories) {
+  image_files <- list.files(path = category, pattern = "\\.jpg$", full.names = TRUE)
+  output_subdir <- file.path(processed_dir, basename(category))
+  dir.create(output_subdir, recursive = TRUE, showWarnings = FALSE)
+  
+  for (file in image_files) {
+    output_file <- file.path(output_subdir, basename(file))
+    resize_and_save(file, output_file, target_width, target_height)
+  }
+}
+```
+
+# Methods
+
+I applied the following methods:
+- Image preprocessing: Standardizing images to 128x128 pixels to facilitate future modeling.
+- Visually inspecting sample images from each category.
+- Checking the balance and distribution of the dataset.
+
+# Results
+
+## Sample Images from Each Category
+
+```{r show-samples, echo=TRUE}
+display_sample_images <- function(category_path, n = 3) {
+  image_files <- list.files(path = category_path, pattern = "\\.jpg$", full.names = TRUE)
+  sample_files <- sample(image_files, n)
+  par(mfrow = c(1, n), mar = c(1,1,1,1))
+  for (file in sample_files) {
+    img <- load.image(file)
+    plot(img, main = basename(file))
+  }
+}
+
+for (category in disease_categories) {
+  cat("Category:", basename(category), "\n")
+  display_sample_images(category)
+}
+```
+
+
+## Class Distribution
+
+```{r class-distribution, echo=TRUE}
+category_counts <- sapply(disease_categories, function(cat) {
+  files <- list.files(path = cat, pattern = "\\.jpg$", full.names = TRUE)
+  length(files)
+})
+
+# Check if all counts are numeric and valid
+print(category_counts)
+print(basename(disease_categories))
+
+# Barplot safely
+barplot(as.numeric(category_counts), 
+        names.arg = basename(disease_categories), 
+        las = 2, 
+        main = "Class Distribution", 
+        col = "lightblue", 
+        cex.names = 0.8)
+
+```
+
+## Findings
+
+- The dataset is well-diversified across several disease categories.
+- Three categories have fewer samples, which could pose class imbalance challenges in modeling tasks.
+- Visually inspecting the leaves shows that there is potential in the future to introduce machine learning to classify leaf disease.
+
+
+```{r}
+
+library(imager)
+library(ggplot2)
+library(reshape2)
+
+get_average_rgb <- function(img_path) {
+  img <- load.image(img_path)
+  num_channels <- dim(img)[3]
+  
+  if (num_channels == 1) {
+    # Grayscale image: replicate grayscale to RGB channels
+    img_array <- as.array(img)
+    img_array <- array(rep(img_array, 3), dim = c(dim(img)[1], dim(img)[2], 3, 1))
+  } else if (num_channels >= 3) {
+    img_array <- as.array(img)[,,1:3,]  # Take first 3 channels
+  } else {
+    stop(paste("Unexpected number of channels in image:", img_path))
+  }
+  
+  avg <- apply(img_array, 3, mean)
+  names(avg) <- c("R", "G", "B")
+  return(avg)
+}
+
+# Calculate average RGB per category (10 samples per category)
+average_colors <- sapply(disease_categories, function(cat) {
+  files <- list.files(cat, pattern = "\\.[jJ][pP][eE]?[gG]$", full.names = TRUE)
+  sample_files <- sample(files, min(10, length(files)))
+  colMeans(t(sapply(sample_files, get_average_rgb)))
+})
+
+# Prepare data for ggplot
+average_colors_df <- as.data.frame(t(average_colors))
+average_colors_df$Category <- basename(rownames(average_colors_df))
+df_melted <- melt(average_colors_df, id.vars = "Category")
+
+# Clean ggplot2 barplot
+ggplot(df_melted, aes(x = Category, y = value, fill = variable)) +
+  geom_bar(stat = "identity", position = "dodge") +
+  labs(title = "Average RGB Composition per Category",
+       x = "Disease Category",
+       y = "Average Color Intensity (0-255)",
+       fill = "Color Channel") +
+  theme_minimal(base_size = 14) +
+  scale_fill_manual(values = c("R" = "red", "G" = "green", "B" = "blue")) +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1),
+        plot.title = element_text(face = "bold", hjust = 0.5))
+```
+# Conclusion
+
+We can observe that healthy leaves are much greener. This can be expected because maize leaves have healthier / higher chlorophyll.
+For blighted leaves, green color values are much lower than Healthy leaves, and blighted leaves are more red in ratio.
+Gray Leaf Spotted leaves have a bit more blue, and a slightly more balanced RGB ratio than compared to blighted leaves, but red is still quite visible and its green is still lower than healthy leaves.
+Common Rust leaves have the lowest intensity in RGB, giving it its signature dull and brown look as opposed to healthy, green maize leaves.
+
+All three types of diseased leaves have reduced amounts of green, showing that disease damages green pigmentation in leaves and suggests that all diseased leaves might on average be less green.
+
+
+Key next steps include:
+We could apply neural networks like CNNs for image classification.
+  - We should also augment the dataset to handle class imbalances to try and avoid biases.
+
+# References
+
+- Smaranjit Ghose. (2020). Corn or Maize Leaf Disease Dataset. Kaggle. [https://www.kaggle.com/datasets/smaranjitghose/corn-or-maize-leaf-disease-dataset](https://www.kaggle.com/datasets/smaranjitghose/corn-or-maize-leaf-disease-dataset)
